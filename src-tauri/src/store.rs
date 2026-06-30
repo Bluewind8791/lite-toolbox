@@ -43,6 +43,9 @@ pub struct Store {
     pub folders: Vec<Folder>,
     #[serde(default)]
     pub projects: Vec<Project>,
+    // 기존 데이터의 order 를 이름순으로 1회 시드했는지 표시.
+    #[serde(default)]
+    pub name_seeded: bool,
 }
 
 impl Default for Store {
@@ -51,6 +54,7 @@ impl Default for Store {
             version: SCHEMA_VERSION,
             folders: Vec::new(),
             projects: Vec::new(),
+            name_seeded: false,
         }
     }
 }
@@ -69,7 +73,19 @@ pub fn load() -> Store {
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Store::default();
     };
-    serde_json::from_str(&text).unwrap_or_default()
+    let mut store: Store = serde_json::from_str(&text).unwrap_or_default();
+    // 최초 1회: 기존 프로젝트 order 를 이름순으로 재배치(기본 정렬 = 이름순).
+    if !store.name_seeded {
+        store
+            .projects
+            .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        for (i, p) in store.projects.iter_mut().enumerate() {
+            p.order = i as i64;
+        }
+        store.name_seeded = true;
+        let _ = save(&store);
+    }
+    store
 }
 
 /// 디스크에 저장. 디렉토리 자동 생성.
@@ -276,20 +292,55 @@ pub fn move_folder(id: &str, parent_id: Option<String>) -> Result<(), String> {
     save(&store)
 }
 
-/// 프로젝트를 폴더에 배정. folder_id None = 미분류.
-pub fn move_project(id: &str, folder_id: Option<String>) -> Result<(), String> {
+/// 프로젝트를 폴더에 배정 + 위치 지정. folder_id None = 미분류.
+/// before_id Some 이면 대상 폴더에서 해당 프로젝트 바로 앞에 삽입, None 이면 맨 끝.
+/// 대상 폴더 형제들의 order 를 0..n 으로 재할당.
+pub fn move_project(
+    id: &str,
+    folder_id: Option<String>,
+    before_id: Option<String>,
+) -> Result<(), String> {
     let mut store = load();
     if let Some(fid) = &folder_id {
         if !store.folders.iter().any(|f| &f.id == fid) {
             return Err(format!("폴더 없음: {fid}"));
         }
     }
-    let p = store
+    if !store.projects.iter().any(|p| p.id == id) {
+        return Err(format!("프로젝트 없음: {id}"));
+    }
+    // 폴더 갱신.
+    store
         .projects
         .iter_mut()
         .find(|p| p.id == id)
-        .ok_or_else(|| format!("프로젝트 없음: {id}"))?;
-    p.folder_id = folder_id;
+        .unwrap()
+        .folder_id = folder_id.clone();
+
+    // 대상 폴더 형제 id 를 order 순으로.
+    let mut ids: Vec<(i64, String)> = store
+        .projects
+        .iter()
+        .filter(|p| p.folder_id == folder_id)
+        .map(|p| (p.order, p.id.clone()))
+        .collect();
+    ids.sort_by_key(|(o, _)| *o);
+    let mut ids: Vec<String> = ids.into_iter().map(|(_, id)| id).collect();
+
+    // 대상을 빼고 원하는 위치에 재삽입.
+    ids.retain(|x| x != id);
+    let pos = match &before_id {
+        Some(bid) => ids.iter().position(|x| x == bid).unwrap_or(ids.len()),
+        None => ids.len(),
+    };
+    ids.insert(pos, id.to_string());
+
+    // order 재할당.
+    for (i, pid) in ids.iter().enumerate() {
+        if let Some(p) = store.projects.iter_mut().find(|p| &p.id == pid) {
+            p.order = i as i64;
+        }
+    }
     save(&store)
 }
 

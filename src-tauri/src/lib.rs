@@ -108,10 +108,15 @@ fn move_folder(id: String, parent_id: Option<String>) -> Result<(), String> {
     store::move_folder(&id, parent_id)
 }
 
-/// 프로젝트를 폴더에 배정. folder_id 생략 시 미분류.
+/// 프로젝트를 폴더에 배정 + 위치 지정. folder_id 생략 시 미분류.
+/// before_id 지정 시 해당 프로젝트 앞에, 생략 시 폴더 맨 끝에 배치.
 #[tauri::command]
-fn move_project(id: String, folder_id: Option<String>) -> Result<(), String> {
-    store::move_project(&id, folder_id)
+fn move_project(
+    id: String,
+    folder_id: Option<String>,
+    before_id: Option<String>,
+) -> Result<(), String> {
+    store::move_project(&id, folder_id, before_id)
 }
 
 /// JetBrains 최근 프로젝트(recentProjects.xml) 일괄 임포트. 신규 추가 건수 반환.

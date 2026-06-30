@@ -61,6 +61,8 @@
   // 드래그 중 프로젝트 id (폴더는 항상 루트, 드래그 불가).
   let dragItem = $state<string | null>(null);
   let dropTarget = $state<string | null | undefined>(undefined);
+  // 이 프로젝트 카드 "앞"에 삽입 예정임을 표시.
+  let dropBeforeId = $state<string | null>(null);
 
   function childFolders(parentId: string | null): Folder[] {
     return folders
@@ -310,7 +312,42 @@
     if (!projectId) return;
     error = "";
     try {
-      await invoke("move_project", { id: projectId, folderId });
+      // beforeId 없음 = 폴더 맨 끝에 배치.
+      await invoke("move_project", { id: projectId, folderId, beforeId: null });
+      await reload();
+    } catch (e2) {
+      error = String(e2);
+    }
+  }
+
+  // 카드 위로 드래그: 그 카드 앞에 삽입 예정 표시. (검색 중엔 비활성)
+  function allowBefore(e: DragEvent, p: Project) {
+    if (!dragItem || dragItem === p.id || search.trim()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropBeforeId = p.id;
+    dropTarget = undefined;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  }
+  function clearBefore() {
+    dropBeforeId = null;
+  }
+  // 카드 위에 드롭: 같은 폴더의 그 카드 앞으로 이동(재정렬).
+  async function dropBeforeCard(e: DragEvent, p: Project) {
+    if (search.trim()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const projectId = dragItem;
+    dragItem = null;
+    dropBeforeId = null;
+    if (!projectId || projectId === p.id) return;
+    error = "";
+    try {
+      await invoke("move_project", {
+        id: projectId,
+        folderId: p.folderId ?? null,
+        beforeId: p.id,
+      });
       await reload();
     } catch (e2) {
       error = String(e2);
@@ -366,7 +403,19 @@
     {:else}
       <ul class="ide-list">
         {#each ides as ide (ide.id)}
-          <li class="ide-card">
+          <li
+            class="ide-card clickable"
+            class:busy={launching === ide.id}
+            role="button"
+            tabindex="0"
+            onclick={() => launch(ide)}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                launch(ide);
+              }
+            }}
+          >
             {#if iconCache[ide.id]}
               <img class="ide-icon" src={iconCache[ide.id]} alt={ide.productCode} />
             {:else}
@@ -376,13 +425,9 @@
               <div class="name">{ide.toolName}</div>
               <div class="version">{ide.version}</div>
             </div>
-            <button
-              class="launch"
-              onclick={() => launch(ide)}
-              disabled={launching === ide.id}
-            >
-              {launching === ide.id ? "실행 중…" : "실행"}
-            </button>
+            {#if launching === ide.id}
+              <span class="launch-state muted">실행 중…</span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -576,8 +621,12 @@
 {#snippet projectCard(p: Project, depth: number)}
   <li
     class="proj-card"
+    class:drop-before={dropBeforeId === p.id}
     draggable="true"
     ondragstart={(e) => startDrag(e, p.id)}
+    ondragover={(e) => allowBefore(e, p)}
+    ondragleave={clearBefore}
+    ondrop={(e) => dropBeforeCard(e, p)}
     ondblclick={() => openProject(p)}
     style="margin-left:{depth * 1.1}rem"
   >
@@ -787,6 +836,32 @@
 
   .proj-card {
     cursor: grab;
+    position: relative;
+  }
+  .proj-card.drop-before::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -3px;
+    height: 2px;
+    background: #396cd8;
+    border-radius: 2px;
+  }
+
+  .ide-card.clickable {
+    cursor: pointer;
+  }
+  .ide-card.clickable:hover {
+    outline: 1px solid #396cd8;
+  }
+  .ide-card.busy {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .launch-state {
+    flex: none;
+    font-size: 0.8rem;
   }
 
   .ide-icon {
