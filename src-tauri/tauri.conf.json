@@ -15,7 +15,8 @@
         "title": "Lite Toolbox",
         "width": 400,
         "height": 600,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "skipTaskbar": true
       }
     ],
     "security": {

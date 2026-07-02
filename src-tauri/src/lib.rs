@@ -10,6 +10,18 @@ use store::{Folder, Project};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// blur(포커스 상실) 시 창 자동 숨김을 일시 억제하는 플래그.
+/// 네이티브 파일 다이얼로그가 열릴 때 메인 창이 blur 되어 숨는 것을 방지.
+#[derive(Default)]
+struct IgnoreBlur(AtomicBool);
+
+/// 다이얼로그 등 blur 숨김을 억제할 구간 진입/이탈 시 프론트가 호출.
+#[tauri::command]
+fn set_ignore_blur(state: tauri::State<IgnoreBlur>, ignore: bool) {
+    state.0.store(ignore, Ordering::Relaxed);
+}
 
 /// 설치된 IDE 목록 반환 (Toolbox state.json 기반).
 #[tauri::command]
@@ -168,6 +180,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(IgnoreBlur::default())
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
                 window_pos::pin_bottom_right(&window);
@@ -178,6 +191,12 @@ pub fn run() {
                     tauri::WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         let _ = w.hide();
+                    }
+                    // 포커스 상실(창 밖 클릭) → 트레이로 숨김. 다이얼로그 구간은 제외.
+                    tauri::WindowEvent::Focused(false) => {
+                        if !w.state::<IgnoreBlur>().0.load(Ordering::Relaxed) {
+                            let _ = w.hide();
+                        }
                     }
                     // 이동 시 우측 하단으로 스냅백 (항상 고정).
                     tauri::WindowEvent::Moved(_) => {
@@ -249,7 +268,8 @@ pub fn run() {
             move_folder,
             move_project,
             import_recent_projects,
-            open_project
+            open_project,
+            set_ignore_blur
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

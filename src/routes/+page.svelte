@@ -141,10 +141,16 @@
     error = "";
     addingIde = true;
     try {
-      const exe = await open({
-        title: "IDE 실행 파일 선택 (*.exe)",
-        filters: [{ name: "실행 파일", extensions: ["exe"] }],
-      });
+      await invoke("set_ignore_blur", { ignore: true });
+      let exe;
+      try {
+        exe = await open({
+          title: "IDE 실행 파일 선택 (*.exe)",
+          filters: [{ name: "실행 파일", extensions: ["exe"] }],
+        });
+      } finally {
+        await invoke("set_ignore_blur", { ignore: false });
+      }
       if (!exe) return;
       await invoke("add_manual_ide", { path: exe });
       await scan();
@@ -180,7 +186,13 @@
   async function addProject() {
     error = "";
     try {
-      const dir = await open({ directory: true, title: "프로젝트 폴더 선택" });
+      await invoke("set_ignore_blur", { ignore: true });
+      let dir;
+      try {
+        dir = await open({ directory: true, title: "프로젝트 폴더 선택" });
+      } finally {
+        await invoke("set_ignore_blur", { ignore: false });
+      }
       if (!dir) return;
       await invoke("add_project", { path: dir });
       await reload();
