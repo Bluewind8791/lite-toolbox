@@ -192,11 +192,17 @@ pub fn run() {
                         api.prevent_close();
                         let _ = w.hide();
                     }
-                    // 포커스 상실(창 밖 클릭) → 트레이로 숨김. 다이얼로그 구간은 제외.
+                    // 포커스 상실 → 트레이로 숨김. 단 제외:
+                    //  - 다이얼로그 구간(IgnoreBlur)
+                    //  - 커서가 창 안 → 자기 창 테두리 잡고 리사이즈/이동 중
                     tauri::WindowEvent::Focused(false) => {
-                        if !w.state::<IgnoreBlur>().0.load(Ordering::Relaxed) {
-                            let _ = w.hide();
+                        if w.state::<IgnoreBlur>().0.load(Ordering::Relaxed) {
+                            return;
                         }
+                        if window_pos::cursor_in_window(&w) {
+                            return;
+                        }
+                        let _ = w.hide();
                     }
                     // 이동 시 우측 하단으로 스냅백 (항상 고정).
                     tauri::WindowEvent::Moved(_) => {

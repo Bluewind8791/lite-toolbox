@@ -45,3 +45,28 @@ pub fn pin_bottom_right(window: &WebviewWindow) {
         let _ = window.set_position(pos);
     }
 }
+
+/// 현재 마우스 커서가 창의 외곽 사각형 안에 있는지.
+/// 리사이즈/이동 드래그 중(테두리 잡음) 발생하는 blur 를 창 밖 클릭과 구분하는 용도.
+#[cfg(windows)]
+pub fn cursor_in_window(window: &WebviewWindow) -> bool {
+    use windows_sys::Win32::Foundation::POINT;
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut pt = POINT { x: 0, y: 0 };
+    if unsafe { GetCursorPos(&mut pt) } == 0 {
+        return false;
+    }
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    pt.x >= pos.x
+        && pt.x < pos.x + size.width as i32
+        && pt.y >= pos.y
+        && pt.y < pos.y + size.height as i32
+}
+
+#[cfg(not(windows))]
+pub fn cursor_in_window(_window: &WebviewWindow) -> bool {
+    false
+}

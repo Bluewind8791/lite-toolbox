@@ -380,9 +380,6 @@
 <main class="container">
   <header>
     <h1>Lite Toolbox</h1>
-    <button onclick={scan} disabled={loading}>
-      {loading ? "스캔 중…" : "재스캔"}
-    </button>
   </header>
 
   {#if error}
@@ -405,7 +402,12 @@
   </div>
 
   <section hidden={tab !== "ide"}>
-    <h2>설치됨</h2>
+    <div class="section-head">
+      <h2>설치됨</h2>
+      <button onclick={scan} disabled={loading}>
+        {loading ? "스캔 중…" : "재스캔"}
+      </button>
+    </div>
     {#if loading && ides.length === 0}
       <p class="muted">IDE 탐지 중…</p>
     {:else if ides.length === 0}
