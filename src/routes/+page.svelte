@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
-  import { onMount } from "svelte";
+  import { onMount, onDestroy } from "svelte";
 
   interface DetectedIde {
     id: string;
@@ -50,8 +50,6 @@
   let tab = $state<"project" | "ide" | "settings">("project");
   let showFolderAdd = $state(false);
   let search = $state("");
-  // 프로젝트별 선택 IDE (preferred 없을 때 사용자 선택).
-  let pickedIde = $state<Record<string, string>>({});
   // 폴더 접힘 상태 (미지정 = 펼침).
   let collapsed = $state<Record<string, boolean>>({});
   // 인라인 이름편집 중인 폴더.
@@ -201,17 +199,19 @@
     }
   }
 
-  async function importRecent() {
-    importing = true;
-    error = "";
+  // silent=true: 자동 10초 폴링용 — 스피너/에러 표시 없음.
+  async function importRecent(silent = false) {
+    if (!silent) {
+      importing = true;
+      error = "";
+    }
     try {
-      const added = await invoke<number>("import_recent_projects");
+      await invoke<number>("import_recent_projects");
       await reload();
-      if (added === 0) error = "새로 가져온 프로젝트가 없습니다.";
     } catch (e) {
-      error = String(e);
+      if (!silent) error = String(e);
     } finally {
-      importing = false;
+      if (!silent) importing = false;
     }
   }
 
@@ -225,8 +225,12 @@
     }
   }
 
+  // 프로젝트가 열릴 IDE — 히스토리(preferred) 우선, 없으면 첫 탐지 IDE.
   function ideFor(p: Project): string | undefined {
-    return pickedIde[p.id] ?? p.preferredIdeId ?? ides[0]?.id;
+    return p.preferredIdeId ?? ides[0]?.id;
+  }
+  function ideById(id: string | undefined): DetectedIde | undefined {
+    return id ? ides.find((i) => i.id === id) : undefined;
   }
 
   async function openProject(p: Project) {
@@ -366,15 +370,21 @@
     }
   }
 
+  let refreshTimer: ReturnType<typeof setInterval> | undefined;
+
   onMount(async () => {
     await scan();
     await reload();
+    await importRecent(true); // 시작 시 1회 자동 갱신
+    refreshTimer = setInterval(() => importRecent(true), 10000);
     try {
       dataDir = await invoke<string>("data_dir");
     } catch (e) {
       error = String(e);
     }
   });
+
+  onDestroy(() => clearInterval(refreshTimer));
 </script>
 
 <main class="container">
@@ -448,7 +458,7 @@
     {/if}
   </section>
 
-  <section hidden={tab !== "project"}>
+  <section class="project-pane" hidden={tab !== "project"}>
     <div class="section-head">
       <div class="search">
         <input
@@ -461,14 +471,6 @@
         {/if}
       </div>
       <div class="head-btns">
-        <button
-          class="icon"
-          onclick={importRecent}
-          disabled={importing}
-          title="최근 프로젝트 가져오기"
-        >
-          {importing ? "⏳" : "🕘"}
-        </button>
         <button
           class="icon"
           onclick={() => (showFolderAdd = !showFolderAdd)}
@@ -505,6 +507,7 @@
       </div>
     {/if}
 
+    <div class="proj-scroll">
     {#if search.trim()}
       {#if results.length === 0}
         <p class="muted">검색 결과 없음.</p>
@@ -517,8 +520,8 @@
       {/if}
     {:else if projects.length === 0 && folders.length === 0}
       <p class="muted">
-        등록된 프로젝트가 없습니다. "최근 프로젝트 가져오기"로 IDE 기록을 불러올 수
-        있습니다.
+        등록된 프로젝트가 없습니다. 설정 탭의 "수동으로 최근 프로젝트 가져오기"로 IDE
+        기록을 불러올 수 있습니다.
       </p>
     {:else}
       <ul class="tree">
@@ -549,6 +552,7 @@
         </li>
       </ul>
     {/if}
+    </div>
   </section>
 
   <section hidden={tab !== "settings"}>
@@ -576,6 +580,12 @@
         {/each}
       </ul>
     {/if}
+
+    <h2>최근 프로젝트</h2>
+    <p class="muted small">10초마다 자동 갱신됩니다.</p>
+    <button onclick={() => importRecent()} disabled={importing}>
+      {importing ? "가져오는 중…" : "수동으로 최근 프로젝트 가져오기"}
+    </button>
 
     <h2>데이터</h2>
     <p class="muted small">저장 위치</p>
@@ -633,6 +643,7 @@
 {/snippet}
 
 {#snippet projectCard(p: Project, depth: number)}
+  {@const ide = ideById(ideFor(p))}
   <li
     class="proj-card"
     class:drop-before={dropBeforeId === p.id}
@@ -644,21 +655,27 @@
     ondblclick={() => openProject(p)}
     style="margin-left:{depth * 1.1}rem"
   >
+    {#if ide && iconCache[ide.id]}
+      <img class="proj-ide-icon" src={iconCache[ide.id]} alt={ide.productCode} title={ide.toolName} />
+    {:else if ide}
+      <span class="proj-ide-badge" title={ide.toolName}>{ide.productCode}</span>
+    {:else}
+      <span class="proj-ide-badge none" title="IDE 미지정">?</span>
+    {/if}
     <div class="info" class:missing={missing.has(p.id)}>
       <div class="name" title={missing.has(p.id) ? "디렉토리 없음" : p.name}>
         {p.name}
       </div>
       <div class="path">{p.path}</div>
     </div>
-    <select bind:value={pickedIde[p.id]} title="열 IDE 선택">
-      {#each ides as ide (ide.id)}
-        <option value={ide.id} selected={ideFor(p) === ide.id}>
-          {ide.productCode}
-        </option>
-      {/each}
-    </select>
-    <button class="launch" onclick={() => openProject(p)} disabled={opening === p.id}>
-      {opening === p.id ? "여는 중…" : "열기"}
+    <button
+      class="launch"
+      onclick={() => openProject(p)}
+      disabled={opening === p.id}
+      title={opening === p.id ? "여는 중…" : "열기"}
+      aria-label="열기"
+    >
+      {opening === p.id ? "⏳" : "▶"}
     </button>
     <button class="remove" onclick={() => removeProject(p)} title="제거">✕</button>
   </li>
@@ -671,10 +688,42 @@
     background-color: #f6f6f6;
   }
 
+  :global(html),
+  :global(body) {
+    height: 100%;
+    margin: 0;
+  }
+
   .container {
     max-width: 640px;
     margin: 0 auto;
     padding: 0.75rem;
+    height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* 보이는 탭 섹션이 남은 높이를 채움. 기본은 섹션 전체 스크롤(IDE/설정). */
+  main > section:not([hidden]) {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* 프로젝트 탭: 헤더/폴더추가는 고정, 트리만 스크롤. */
+  section.project-pane {
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .project-pane > .section-head,
+  .project-pane > .folder-add {
+    flex: none;
+  }
+  .proj-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
   }
 
   header {
@@ -954,6 +1003,8 @@
   .launch {
     flex: none;
     padding: 0.4em 0.6em;
+    font-size: 0.95rem;
+    line-height: 1;
   }
 
   .remove {
@@ -962,10 +1013,27 @@
     color: #c0392b;
   }
 
-  select {
+  .proj-ide-icon {
     flex: none;
-    padding: 0.3em;
-    border-radius: 6px;
+    width: 1.8rem;
+    height: 1.8rem;
+    object-fit: contain;
+  }
+  .proj-ide-badge {
+    flex: none;
+    width: 1.8rem;
+    height: 1.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.7rem;
+    color: #fff;
+    background: #396cd8;
+    border-radius: 5px;
+  }
+  .proj-ide-badge.none {
+    background: #bbb;
   }
 
   .error {
@@ -1032,8 +1100,7 @@
       background: transparent;
     }
     .folder-add input,
-    .search input,
-    select {
+    .search input {
       color: #fff;
       background-color: #1f1f1f;
       border-color: #444;

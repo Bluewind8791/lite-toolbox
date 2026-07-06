@@ -149,12 +149,19 @@ pub struct ImportItem {
     pub last_opened_at: Option<String>,
 }
 
-/// 여러 프로젝트 일괄 임포트. 기존 경로(id)와 배치 내 중복은 건너뜀. 신규 추가 건수 반환.
+/// epoch millis 문자열 → u64 (빈/파싱실패 = 0).
+fn ts(s: &Option<String>) -> u64 {
+    s.as_deref().and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+
+/// 여러 프로젝트 일괄 임포트. 신규 추가 건수 반환.
+/// 기존 프로젝트도 xml 이 더 최신(last_opened)이면 preferred/last_opened 갱신.
+/// 배치 내 중복은 건너뜀.
 pub fn import_projects(items: Vec<ImportItem>) -> Result<usize, String> {
     let mut store = load();
-    let mut existing: std::collections::HashSet<String> =
-        store.projects.iter().map(|p| p.id.clone()).collect();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut added = 0usize;
+    let mut changed = false;
     let mut order = store.projects.len() as i64;
     for it in items {
         let path = it.path.trim();
@@ -162,8 +169,19 @@ pub fn import_projects(items: Vec<ImportItem>) -> Result<usize, String> {
             continue;
         }
         let id = id_from_path(path);
-        if !existing.insert(id.clone()) {
-            continue; // 이미 있음(기존 or 배치 중복)
+        if !seen.insert(id.clone()) {
+            continue; // 배치 내 중복
+        }
+        if let Some(existing) = store.projects.iter_mut().find(|p| p.id == id) {
+            // 기존 항목: xml 이 더 최신일 때만 갱신(앱-열기 기록 역행 방지).
+            if ts(&it.last_opened_at) > ts(&existing.last_opened_at) {
+                if it.preferred_ide_id.is_some() {
+                    existing.preferred_ide_id = it.preferred_ide_id;
+                }
+                existing.last_opened_at = it.last_opened_at;
+                changed = true;
+            }
+            continue;
         }
         store.projects.push(Project {
             id,
@@ -177,8 +195,9 @@ pub fn import_projects(items: Vec<ImportItem>) -> Result<usize, String> {
         });
         order += 1;
         added += 1;
+        changed = true;
     }
-    if added > 0 {
+    if changed {
         save(&store)?;
     }
     Ok(added)
