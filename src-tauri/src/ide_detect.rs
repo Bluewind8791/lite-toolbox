@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetectedIde {
-    /// 안정적 식별자 (toolId + buildNumber). 같은 제품 다중 버전 구분.
+    /// 안정적 식별자 (toolId/productCode). 빌드번호 제외 → IDE 업데이트에도 유지.
     pub id: String,
     pub tool_name: String,
     pub product_code: String,
@@ -71,7 +71,7 @@ fn parse_state(json: &str) -> Result<Vec<DetectedIde>, serde_json::Error> {
 fn map_tool(t: ToolboxTool) -> DetectedIde {
     let icon_path = icon_for_exe(Path::new(&t.launch_command));
     DetectedIde {
-        id: format!("{}_{}", t.tool_id, t.build_number),
+        id: t.tool_id,
         tool_name: t.display_name,
         product_code: t.product_code,
         version: t.display_version,
@@ -154,7 +154,7 @@ fn ide_from_install_dir(dir: &Path, source: &str) -> Option<DetectedIde> {
     }
     let icon_path = icon_abs(dir, &info.svg_icon_path);
     Some(DetectedIde {
-        id: format!("{}_{}", info.product_code, info.build_number),
+        id: info.product_code.clone(),
         tool_name: info.name,
         product_code: info.product_code,
         version: info.version,
@@ -288,7 +288,7 @@ mod tests {
             "C:\\Users\\castu\\AppData\\Local\\Programs\\IntelliJ IDEA\\bin\\idea64.exe"
         );
         assert_eq!(idea.source, "toolbox");
-        assert_eq!(idea.id, "IDEA-U_261.25134.95");
+        assert_eq!(idea.id, "IDEA-U");
     }
 
     #[test]
@@ -363,7 +363,7 @@ mod tests {
         let ide = ide_from_install_dir(&dir, "standalone").expect("should parse");
         assert_eq!(ide.product_code, "WS");
         assert_eq!(ide.version, "2025.1.2");
-        assert_eq!(ide.id, "WS_251.23774.456");
+        assert_eq!(ide.id, "WS");
         assert_eq!(ide.source, "standalone");
         assert!(ide.exe_path.ends_with("webstorm64.exe"));
         std::fs::remove_dir_all(&dir).ok();

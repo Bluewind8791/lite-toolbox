@@ -225,9 +225,16 @@
     }
   }
 
-  // 프로젝트가 열릴 IDE — 히스토리(preferred) 우선, 없으면 첫 탐지 IDE.
+  // 프로젝트가 열릴 IDE — 히스토리(preferred) 우선, 없으면 폴백.
+  // preferred 가 탐지 목록에 없으면(옛 id 형식 `{toolId}_{build}`):
+  //   1) toolId 부분(첫 `_` 앞) 으로 같은 제품 매칭 → 제품 유지
+  //   2) 그래도 없으면 첫 탐지 IDE
   function ideFor(p: Project): string | undefined {
-    return p.preferredIdeId ?? ides[0]?.id;
+    const pref = p.preferredIdeId;
+    if (!pref) return ides[0]?.id;
+    if (ides.some((i) => i.id === pref)) return pref;
+    const product = pref.split("_")[0];
+    return ides.find((i) => i.id === product)?.id ?? ides[0]?.id;
   }
   function ideById(id: string | undefined): DetectedIde | undefined {
     return id ? ides.find((i) => i.id === id) : undefined;
