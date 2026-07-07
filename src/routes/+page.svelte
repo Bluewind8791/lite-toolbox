@@ -718,7 +718,7 @@
     overflow-y: auto;
   }
   /* 프로젝트 탭: 헤더/폴더추가는 고정, 트리만 스크롤. */
-  section.project-pane {
+  section.project-pane:not([hidden]) {
     overflow: hidden;
     display: flex;
     flex-direction: column;
