@@ -1,7 +1,11 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
   import { onMount, onDestroy } from "svelte";
+
+  const minimizeWindow = () => getCurrentWindow().minimize();
+  const closeWindow = () => getCurrentWindow().close();
 
   interface DetectedIde {
     id: string;
@@ -404,13 +408,21 @@
 <main class="container">
   <div class="glow"></div>
 
-  <header class="topbar">
+  <header class="topbar" data-tauri-drag-region>
     <div class="brand">
       <img class="brand-logo" src="/tray-icon.png" alt="logo" />
       <div class="brand-text">
         <span class="brand-sub">Lite</span>
         <span class="brand-title">Toolbox</span>
       </div>
+    </div>
+    <div class="win-controls">
+      <button class="win-btn" onclick={minimizeWindow} title="최소화" aria-label="최소화">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="12" x2="18" y2="12" /></svg>
+      </button>
+      <button class="win-btn win-close" onclick={closeWindow} title="닫기" aria-label="닫기">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="6" y1="6" x2="18" y2="18" /><line x1="18" y1="6" x2="6" y2="18" /></svg>
+      </button>
     </div>
   </header>
 
@@ -820,6 +832,36 @@
     display: flex;
     align-items: center;
     gap: 11px;
+  }
+  .win-controls {
+    margin-left: auto;
+    display: flex;
+    gap: 2px;
+  }
+  .win-btn {
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: #b8b4bd;
+    border-radius: 7px;
+    cursor: pointer;
+    padding: 0;
+  }
+  .win-btn svg {
+    width: 16px;
+    height: 16px;
+  }
+  .win-btn:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+  .win-close:hover {
+    background: #c0392b;
+    color: #fff;
   }
   .brand-logo {
     width: 36px;
