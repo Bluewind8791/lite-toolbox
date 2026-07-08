@@ -48,14 +48,20 @@
   // IDE id → 아이콘 data URL.
   let iconCache = $state<Record<string, string>>({});
   let tab = $state<"project" | "ide" | "settings">("project");
-  let showFolderAdd = $state(false);
   let search = $state("");
+  // 탭바 검색 입력 펼침 상태.
+  let searchOpen = $state(false);
+  function openSearch() {
+    searchOpen = true;
+  }
+  // 비어 있을 때만 접음 (blur).
+  function closeSearchIfEmpty() {
+    if (!search.trim()) searchOpen = false;
+  }
   // 폴더 접힘 상태 (미지정 = 펼침).
   let collapsed = $state<Record<string, boolean>>({});
   // 인라인 이름편집 중인 폴더.
   let editing = $state<{ id: string; value: string } | null>(null);
-  // 루트 폴더 새 이름 입력.
-  let newRoot = $state("");
   // 드래그 중 프로젝트 id (폴더는 항상 루트, 드래그 불가).
   let dragItem = $state<string | null>(null);
   let dropTarget = $state<string | null | undefined>(undefined);
@@ -260,14 +266,15 @@
 
   // --- 폴더 ---
 
-  async function addRootFolder() {
-    const name = newRoot.trim();
-    if (!name) return;
+  // '새 폴더' 자동 추가. 이름 중복 시 " 2", " 3" … 접미사.
+  async function addQuickFolder() {
     error = "";
+    const base = "새 폴더";
+    const taken = new Set(childFolders(null).map((f) => f.name));
+    let name = base;
+    for (let i = 2; taken.has(name); i++) name = `${base} ${i}`;
     try {
       await invoke("add_folder", { name, parentId: null });
-      newRoot = "";
-      showFolderAdd = false;
       await reload();
     } catch (e) {
       error = String(e);
@@ -395,8 +402,16 @@
 </script>
 
 <main class="container">
-  <header>
-    <h1>Lite Toolbox</h1>
+  <div class="glow"></div>
+
+  <header class="topbar">
+    <div class="brand">
+      <img class="brand-logo" src="/tray-icon.png" alt="logo" />
+      <div class="brand-text">
+        <span class="brand-sub">Lite</span>
+        <span class="brand-title">Toolbox</span>
+      </div>
+    </div>
   </header>
 
   {#if error}
@@ -406,23 +421,78 @@
     </p>
   {/if}
 
-  <div class="tabs">
-    <button class:active={tab === "ide"} onclick={() => (tab = "ide")}>
-      IDE
+  <nav class="tabbar">
+    <button class="tab" class:on={tab === "ide"} onclick={() => (tab = "ide")}>
+      도구
     </button>
-    <button class:active={tab === "project"} onclick={() => (tab = "project")}>
+    <button class="tab" class:on={tab === "project"} onclick={() => (tab = "project")}>
       프로젝트
     </button>
-    <button class:active={tab === "settings"} onclick={() => (tab = "settings")}>
+    <button class="tab" class:on={tab === "settings"} onclick={() => (tab = "settings")}>
       설정
     </button>
-  </div>
+
+    {#if tab === "project"}
+      <div class="tab-actions">
+        {#if !searchOpen}
+          <button
+            class="tab-icon"
+            onclick={addQuickFolder}
+            title="폴더 추가"
+            aria-label="폴더 추가"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /><line x1="12" y1="11" x2="12" y2="17" /><line x1="9" y1="14" x2="15" y2="14" /></svg>
+          </button>
+          <button class="tab-icon" onclick={addProject} title="프로젝트 추가" aria-label="프로젝트 추가">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+          </button>
+        {/if}
+        {#if searchOpen}
+          <div class="searchbox">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#9a96a0" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              autofocus
+              placeholder="검색"
+              bind:value={search}
+              spellcheck="false"
+              onblur={closeSearchIfEmpty}
+              onkeydown={(e) => {
+                if (e.key === "Escape") {
+                  search = "";
+                  searchOpen = false;
+                }
+              }}
+            />
+          </div>
+        {:else}
+          <button class="tab-icon" onclick={openSearch} title="검색" aria-label="검색">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </nav>
 
   <section hidden={tab !== "ide"}>
     <div class="section-head">
       <h2>설치됨</h2>
-      <button onclick={scan} disabled={loading}>
-        {loading ? "스캔 중…" : "재스캔"}
+      <button
+        class="tab-icon"
+        onclick={scan}
+        disabled={loading}
+        title={loading ? "스캔 중…" : "재스캔"}
+        aria-label="재스캔"
+      >
+        <svg
+          class:spin={loading}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
       </button>
     </div>
     {#if loading && ides.length === 0}
@@ -466,54 +536,6 @@
   </section>
 
   <section class="project-pane" hidden={tab !== "project"}>
-    <div class="section-head">
-      <div class="search">
-        <input
-          placeholder="프로젝트 검색 (이름/경로)"
-          bind:value={search}
-          spellcheck="false"
-        />
-        {#if search}
-          <button class="icon" onclick={() => (search = "")} title="검색 지우기">✕</button>
-        {/if}
-      </div>
-      <div class="head-btns">
-        <button
-          class="icon"
-          onclick={() => (showFolderAdd = !showFolderAdd)}
-          title="폴더 추가"
-        >
-          📁
-        </button>
-        <button class="icon" onclick={addProject} title="프로젝트 추가">➕</button>
-      </div>
-    </div>
-
-    {#if showFolderAdd}
-      <div class="folder-add">
-        <!-- svelte-ignore a11y_autofocus -->
-        <input
-          placeholder="새 폴더 이름"
-          autofocus
-          bind:value={newRoot}
-          onkeydown={(e) => {
-            if (e.key === "Enter") addRootFolder();
-            if (e.key === "Escape") {
-              newRoot = "";
-              showFolderAdd = false;
-            }
-          }}
-        />
-        <button onclick={addRootFolder}>추가</button>
-        <button
-          onclick={() => {
-            newRoot = "";
-            showFolderAdd = false;
-          }}>취소</button
-        >
-      </div>
-    {/if}
-
     <div class="proj-scroll">
     {#if search.trim()}
       {#if results.length === 0}
@@ -543,11 +565,17 @@
           ondragleave={clearDrop}
           ondrop={(e) => dropOn(e, null)}
         >
-          <div class="folder-head">
-            <button class="twist" onclick={() => toggle("__unfiled__")}>
-              {isCollapsed("__unfiled__") ? "▸" : "▾"}
+          <div class="folder-head" style="padding-left:0">
+            <button
+              class="chevron"
+              class:open={!isCollapsed("__unfiled__")}
+              onclick={() => toggle("__unfiled__")}
+              aria-label={isCollapsed("__unfiled__") ? "펼치기" : "접기"}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18" /></svg>
             </button>
-            <span class="folder-name muted">미분류 / 루트</span>
+            <span class="folder-name">미분류</span>
+            <span class="folder-count">{projectsIn(null).length}</span>
           </div>
           {#if !isCollapsed("__unfiled__")}
             <ul class="children">
@@ -562,42 +590,56 @@
     </div>
   </section>
 
-  <section hidden={tab !== "settings"}>
-    <div class="section-head">
-      <h2>수동 IDE 등록</h2>
-      <button class="icon" onclick={addManualIde} disabled={addingIde} title="IDE 실행파일 추가">
-        {addingIde ? "⏳" : "➕"}
+  <section class="settings-pane" hidden={tab !== "settings"}>
+    <div class="setting-group">
+      <div class="section-head">
+        <h2>수동 IDE 등록</h2>
+        <button
+          class="tab-icon"
+          onclick={addManualIde}
+          disabled={addingIde}
+          title="IDE 실행파일 추가"
+          aria-label="IDE 실행파일 추가"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /><line x1="12" y1="18" x2="12" y2="12" /><line x1="9" y1="15" x2="15" y2="15" /></svg>
+        </button>
+      </div>
+      {#if manualIdes.length === 0}
+        <p class="muted small">
+          자동 탐지되지 않는 IDE 는 우측 아이콘으로 <code>*64.exe</code> 를 직접 등록하세요.
+        </p>
+      {:else}
+        <ul class="ide-list">
+          {#each manualIdes as ide (ide.exePath)}
+            <li class="ide-card">
+              <span class="badge">{ide.productCode}</span>
+              <div class="info">
+                <div class="name">{ide.toolName}</div>
+                <div class="path">{ide.exePath}</div>
+              </div>
+              <button class="row-icon remove" onclick={() => removeManualIde(ide)} title="등록 해제" aria-label="등록 해제">✕</button>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+
+    <div class="setting-group">
+      <h2>최근 프로젝트</h2>
+      <p class="muted small">10초마다 자동 갱신됩니다.</p>
+      <button class="wide" onclick={() => importRecent()} disabled={importing}>
+        {importing ? "가져오는 중…" : "수동으로 최근 프로젝트 가져오기"}
       </button>
     </div>
-    {#if manualIdes.length === 0}
-      <p class="muted">
-        자동 탐지되지 않는 IDE 가 있으면 ➕ 로 <code>*64.exe</code> 를 직접 등록하세요.
-      </p>
-    {:else}
-      <ul class="ide-list">
-        {#each manualIdes as ide (ide.exePath)}
-          <li class="ide-card">
-            <span class="badge">{ide.productCode}</span>
-            <div class="info">
-              <div class="name">{ide.toolName}</div>
-              <div class="path">{ide.exePath}</div>
-            </div>
-            <button class="remove" onclick={() => removeManualIde(ide)} title="등록 해제">✕</button>
-          </li>
-        {/each}
-      </ul>
-    {/if}
 
-    <h2>최근 프로젝트</h2>
-    <p class="muted small">10초마다 자동 갱신됩니다.</p>
-    <button onclick={() => importRecent()} disabled={importing}>
-      {importing ? "가져오는 중…" : "수동으로 최근 프로젝트 가져오기"}
-    </button>
-
-    <h2>데이터</h2>
-    <p class="muted small">저장 위치</p>
-    <p class="path-box">{dataDir || "(확인 불가)"}</p>
-    <button onclick={scan} disabled={loading}>{loading ? "스캔 중…" : "IDE 재스캔"}</button>
+    <div class="setting-group">
+      <h2>데이터</h2>
+      <p class="muted small">저장 위치</p>
+      <p class="path-box">{dataDir || "(확인 불가)"}</p>
+      <button class="wide" onclick={scan} disabled={loading}>
+        {loading ? "스캔 중…" : "IDE 재스캔"}
+      </button>
+    </div>
   </section>
 </main>
 
@@ -609,10 +651,15 @@
       ondragover={(e) => allowDrop(e, folder.id)}
       ondragleave={clearDrop}
       ondrop={(e) => dropOn(e, folder.id)}
-      style="padding-left:{depth * 1.1}rem"
+      style="padding-left:0"
     >
-      <button class="twist" onclick={() => toggle(folder.id)}>
-        {isCollapsed(folder.id) ? "▸" : "▾"}
+      <button
+        class="chevron"
+        class:open={!isCollapsed(folder.id)}
+        onclick={() => toggle(folder.id)}
+        aria-label={isCollapsed(folder.id) ? "펼치기" : "접기"}
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18" /></svg>
       </button>
       {#if editing?.id === folder.id}
         <!-- svelte-ignore a11y_autofocus -->
@@ -628,8 +675,9 @@
         />
       {:else}
         <span class="folder-name" ondblclick={() => startEdit(folder)}>
-          📁 {folder.name}
+          {folder.name}
         </span>
+        <span class="folder-count">{projectsIn(folder.id).length}</span>
       {/if}
       <span class="folder-actions">
         <button onclick={() => startEdit(folder)} title="이름 변경">✎</button>
@@ -660,23 +708,22 @@
     ondragleave={clearBefore}
     ondrop={(e) => dropBeforeCard(e, p)}
     ondblclick={() => openProject(p)}
-    style="margin-left:{depth * 1.1}rem"
   >
     {#if ide && iconCache[ide.id]}
-      <img class="proj-ide-icon" src={iconCache[ide.id]} alt={ide.productCode} title={ide.toolName} />
+      <img class="proj-badge img" src={iconCache[ide.id]} alt={ide.productCode} title={ide.toolName} />
     {:else if ide}
-      <span class="proj-ide-badge" title={ide.toolName}>{ide.productCode}</span>
+      <span class="proj-badge" title={ide.toolName}>{ide.productCode}</span>
     {:else}
-      <span class="proj-ide-badge none" title="IDE 미지정">?</span>
+      <span class="proj-badge none" title="IDE 미지정">?</span>
     {/if}
-    <div class="info" class:missing={missing.has(p.id)}>
-      <div class="name" title={missing.has(p.id) ? "디렉토리 없음" : p.name}>
+    <div class="proj-info" class:missing={missing.has(p.id)}>
+      <div class="proj-name" title={missing.has(p.id) ? "디렉토리 없음" : p.name}>
         {p.name}
       </div>
-      <div class="path">{p.path}</div>
+      <div class="proj-path">{p.path}</div>
     </div>
     <button
-      class="launch"
+      class="row-icon launch"
       onclick={() => openProject(p)}
       disabled={opening === p.id}
       title={opening === p.id ? "여는 중…" : "열기"}
@@ -684,31 +731,63 @@
     >
       {opening === p.id ? "⏳" : "▶"}
     </button>
-    <button class="remove" onclick={() => removeProject(p)} title="제거">✕</button>
+    <button class="row-icon remove" onclick={() => removeProject(p)} title="제거" aria-label="제거">✕</button>
   </li>
 {/snippet}
 
 <style>
   :root {
-    font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-    color: #0f0f0f;
-    background-color: #f6f6f6;
+    font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+    color: #e8e6ea;
+    background-color: #12181c;
   }
 
   :global(html),
   :global(body) {
     height: 100%;
     margin: 0;
+    background-color: #12181c;
+  }
+
+  :global(::-webkit-scrollbar) {
+    width: 8px;
+  }
+  :global(::-webkit-scrollbar-thumb) {
+    background: #ffffff1a;
+    border-radius: 8px;
+  }
+  :global(::-webkit-scrollbar-track) {
+    background: transparent;
   }
 
   .container {
+    position: relative;
     max-width: 640px;
     margin: 0 auto;
-    padding: 0.75rem;
+    padding: 0 0.75rem 0.75rem;
     height: 100vh;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
+    color: #e8e6ea;
+    background: #12181c;
+    overflow: hidden;
+  }
+
+  /* 상단 앰비언트 글로우. */
+  .glow {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 180px;
+    background: radial-gradient(120% 100% at 8% 0%, #1f5f7a 0%, #183c44 45%, #12181c 100%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .container > *:not(.glow) {
+    position: relative;
+    z-index: 1;
   }
 
   /* 보이는 탭 섹션이 남은 높이를 채움. 기본은 섹션 전체 스크롤(IDE/설정). */
@@ -717,56 +796,150 @@
     min-height: 0;
     overflow-y: auto;
   }
-  /* 프로젝트 탭: 헤더/폴더추가는 고정, 트리만 스크롤. */
+  /* 프로젝트 탭: 폴더추가는 고정, 트리만 스크롤. */
   section.project-pane:not([hidden]) {
     overflow: hidden;
     display: flex;
     flex-direction: column;
   }
-  .project-pane > .section-head,
-  .project-pane > .folder-add {
-    flex: none;
-  }
   .proj-scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    padding: 0.4rem 0 1rem;
   }
 
-  header {
+  /* --- 상단바 / 브랜드 --- */
+  .topbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1rem;
+    height: 64px;
+    flex: none;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+  }
+  .brand-logo {
+    width: 36px;
+    height: 36px;
+    object-fit: contain;
+  }
+  .brand-text {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.05;
+  }
+  .brand-sub {
+    font-size: 11px;
+    font-weight: 500;
+    color: #b8b4bd;
+  }
+  .brand-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #fff;
   }
 
-  h1 {
-    font-size: 1.4rem;
-    margin: 0;
+  /* --- 탭바 --- */
+  .tabbar {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    height: 46px;
+    border-bottom: 1px solid #ffffff10;
+    flex: none;
+  }
+  .tab {
+    height: 46px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    border-radius: 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: #8f8b96;
+    cursor: pointer;
+  }
+  .tab.on {
+    font-weight: 600;
+    color: #fff;
+    box-shadow: inset 0 -2px 0 #ffffff;
+  }
+  .tab:hover:not(.on) {
+    color: #c4c0ca;
+  }
+  .tab-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tab-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    box-shadow: none;
+    color: #9a96a0;
+    font-size: 15px;
+    cursor: pointer;
+  }
+  .tab-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+  .tab-icon:hover:not(:disabled) {
+    background: #ffffff12;
+    color: #e8e6ea;
+  }
+  .tab-icon .spin {
+    animation: spin 0.9s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  .searchbox {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 150px;
+    height: 34px;
+  }
+  .searchbox svg {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .searchbox input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: #e8e6ea;
+    font-family: inherit;
+    font-size: 14px;
+    padding: 0;
   }
 
   h2 {
-    font-size: 1rem;
+    font-size: 0.9rem;
     margin: 1rem 0 0.5rem;
-    color: #555;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 0.3rem;
-    margin-bottom: 0.5rem;
-  }
-  .tabs button {
-    flex: 1;
-    border-radius: 6px;
-    box-shadow: none;
-    background: transparent;
-    border: 1px solid #ddd;
-  }
-  .tabs button.active {
-    background: #396cd8;
-    color: #fff;
-    border-color: #396cd8;
+    color: #c4c0ca;
+    font-weight: 600;
   }
 
   .section-head {
@@ -775,61 +948,47 @@
     justify-content: space-between;
     gap: 0.4rem;
   }
-  .section-head .search {
-    flex: 1;
+
+  /* --- 설정 탭 --- */
+  .settings-pane:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 12px;
+  }
+  .setting-group {
+    background: #ffffff08;
+    border: 1px solid #ffffff0d;
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  .setting-group h2 {
+    margin: 0 0 6px;
+  }
+  .setting-group .section-head {
+    margin-bottom: 6px;
+  }
+  .setting-group .section-head h2 {
     margin: 0;
   }
-
-  .head-btns {
-    display: flex;
-    gap: 0.3rem;
+  .setting-group .ide-list {
+    margin-top: 4px;
   }
-  .head-btns .icon {
-    flex: none;
-    padding: 0.35em 0.5em;
-    font-size: 1rem;
-    line-height: 1;
+  .setting-group .ide-card {
+    background: #ffffff0d;
   }
-
-  .folder-add {
-    display: flex;
-    gap: 0.4rem;
-    margin: 0.25rem 0 0.75rem;
+  button.wide {
+    width: 100%;
+    margin-top: 8px;
   }
-  .folder-add input {
-    flex: 1;
-    padding: 0.35em 0.5em;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-  }
-
-  .search {
-    display: flex;
-    gap: 0.3rem;
-    align-items: center;
-    margin: 0.25rem 0 0.5rem;
-  }
-  .search input {
-    flex: 1;
-    padding: 0.35em 0.5em;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-    font-size: 1rem;
-    line-height: 1;
-    box-sizing: border-box;
-  }
-  .head-btns .icon {
-    box-sizing: border-box;
-  }
-
 
   .ide-list {
     list-style: none;
-    margin: 0;
+    margin: 0.4rem 0 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.5rem;
+    gap: 0.4rem;
   }
 
   .tree,
@@ -839,44 +998,82 @@
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 2px;
   }
   .children {
-    margin-top: 0.4rem;
+    margin: 2px 0 2px 15px;
+    padding-left: 9px;
+    border-left: 1px solid #ffffff12;
   }
 
+  /* --- 폴더 헤더 --- */
   .folder-head {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.3rem 0.4rem;
-    border-radius: 6px;
+    gap: 7px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .folder-head:hover {
+    background: #ffffff08;
   }
   .folder-head.drop {
-    outline: 2px dashed #396cd8;
-    background: rgba(57, 108, 216, 0.08);
+    outline: 2px dashed #4fd0c0;
+    background: #4fd0c014;
   }
-  .twist {
+  .chevron {
+    display: flex;
+    align-items: center;
+    justify-content: center;
     flex: none;
-    padding: 0 0.3em;
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
     background: transparent;
     box-shadow: none;
-    border: none;
+    color: #8f8b96;
+    cursor: pointer;
+  }
+  .chevron svg {
+    width: 12px;
+    height: 12px;
+    transition: transform 0.15s ease;
+  }
+  .chevron.open svg {
+    transform: rotate(90deg);
   }
   .folder-name {
-    flex: 1;
+    font-size: 12px;
     font-weight: 600;
+    color: #c4c0ca;
+    letter-spacing: 0.1px;
     cursor: default;
+  }
+  .folder-count {
+    font-size: 11px;
+    font-weight: 500;
+    color: #6f6b77;
   }
   .rename {
     flex: 1;
-    padding: 0.2em 0.4em;
-    border-radius: 4px;
-    border: 1px solid #396cd8;
+    padding: 0.15em 0.4em;
+    border-radius: 5px;
+    border: 1px solid #4fd0c0;
+    background: #ffffff0d;
+    color: #e8e6ea;
+    font-family: inherit;
+    font-size: 12px;
+  }
+  .rename:focus {
+    outline: none;
   }
   .folder-actions {
     display: flex;
     gap: 0.2rem;
+    margin-left: auto;
     opacity: 0;
     transition: opacity 0.1s;
   }
@@ -884,46 +1081,39 @@
     opacity: 1;
   }
   .folder-actions button {
-    padding: 0.15em 0.45em;
+    padding: 0.1em 0.4em;
     box-shadow: none;
+    background: transparent;
+    border: none;
+    color: #8f8b96;
+    font-size: 0.8rem;
+    cursor: pointer;
+  }
+  .folder-actions button:hover {
+    color: #e8e6ea;
   }
 
   .unfiled.drop {
-    outline: 2px dashed #396cd8;
-    border-radius: 6px;
+    outline: 2px dashed #4fd0c0;
+    border-radius: 8px;
   }
 
-  .ide-card,
-  .proj-card {
+  /* --- IDE 카드 --- */
+  .ide-card {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.5rem;
-    background: #fff;
-    border-radius: 8px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+    gap: 13px;
+    padding: 10px;
+    background: #ffffff08;
+    border: 1px solid #ffffff0d;
+    border-radius: 10px;
   }
-
-  .proj-card {
-    cursor: grab;
-    position: relative;
-  }
-  .proj-card.drop-before::before {
-    content: "";
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: -3px;
-    height: 2px;
-    background: #396cd8;
-    border-radius: 2px;
-  }
-
   .ide-card.clickable {
     cursor: pointer;
   }
   .ide-card.clickable:hover {
-    outline: 1px solid #396cd8;
+    background: #ffffff0d;
+    border-color: #4fd0c040;
   }
   .ide-card.busy {
     opacity: 0.6;
@@ -933,136 +1123,183 @@
     flex: none;
     font-size: 0.8rem;
   }
-
   .ide-icon {
     flex: none;
-    width: 2.4rem;
-    height: 2.4rem;
+    width: 34px;
+    height: 34px;
     object-fit: contain;
-    margin-right: 0.5rem;
   }
-
   .badge {
     flex: none;
-    width: 2.4rem;
-    height: 2.4rem;
+    width: 34px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: center;
     font-weight: 700;
-    font-size: 0.85rem;
+    font-size: 0.8rem;
     color: #fff;
-    background: #396cd8;
-    border-radius: 6px;
+    background: linear-gradient(135deg, #1f6f7a, #2a8f8a);
+    border-radius: 9px;
+  }
+
+  /* --- 프로젝트 카드 --- */
+  .proj-card {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 5px 10px;
+    border-radius: 9px;
+    cursor: grab;
+    position: relative;
+  }
+  .proj-card:hover {
+    background: #ffffff0d;
+  }
+  .proj-card.drop-before::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: -2px;
+    height: 2px;
+    background: #4fd0c0;
+    border-radius: 2px;
+  }
+  .proj-badge {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.65rem;
+    color: #fff;
+    background: linear-gradient(135deg, #1f6f7a, #2a8f8a);
+    border-radius: 8px;
+    object-fit: contain;
+  }
+  .proj-badge.img {
+    background: #ffffff0d;
+    padding: 3px;
+  }
+  .proj-badge.none {
+    background: #ffffff14;
+    color: #8b8792;
   }
 
   .info {
     flex: 1;
     min-width: 0;
   }
-  .info.missing .name,
-  .info.missing .path {
-    color: #aaa;
+  .proj-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
   }
-
+  .proj-info.missing .proj-name,
+  .proj-info.missing .proj-path {
+    color: #6f6b77;
+  }
   .name {
     font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-
+  .proj-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: #f0eef2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
   .version {
     font-size: 0.8rem;
-    color: #666;
+    color: #9a96a0;
   }
-
-  .path {
-    font-size: 0.75rem;
-    color: #888;
+  .path,
+  .proj-path {
+    font-size: 11px;
+    color: #8b8792;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
+  /* --- 버튼 (일반) --- */
   button {
     border-radius: 8px;
-    border: 1px solid transparent;
+    border: 1px solid #ffffff1a;
     padding: 0.4em 1em;
-    font-size: 0.9em;
+    font-size: 0.85em;
     font-weight: 500;
     font-family: inherit;
-    color: #0f0f0f;
-    background-color: #fff;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+    color: #e8e6ea;
+    background-color: #ffffff0d;
     cursor: pointer;
   }
-
   button:hover:not(:disabled) {
-    border-color: #396cd8;
+    border-color: #4fd0c0;
+    color: #7ee3d6;
   }
-
   button:disabled {
     opacity: 0.6;
     cursor: default;
   }
 
-  .launch {
+  /* 카드 우측 아이콘 버튼. */
+  .row-icon {
     flex: none;
-    padding: 0.4em 0.6em;
-    font-size: 0.95rem;
-    line-height: 1;
-  }
-
-  .remove {
-    flex: none;
-    padding: 0.4em 0.6em;
-    color: #c0392b;
-  }
-
-  .proj-ide-icon {
-    flex: none;
-    width: 1.8rem;
-    height: 1.8rem;
-    object-fit: contain;
-  }
-  .proj-ide-badge {
-    flex: none;
-    width: 1.8rem;
-    height: 1.8rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
-    font-size: 0.7rem;
-    color: #fff;
-    background: #396cd8;
-    border-radius: 5px;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: #7e7a86;
+    font-size: 0.85rem;
+    line-height: 1;
   }
-  .proj-ide-badge.none {
-    background: #bbb;
+  .row-icon:hover:not(:disabled) {
+    background: #ffffff14;
+    color: #e8e6ea;
+    border: none;
+  }
+  .row-icon.remove:hover:not(:disabled) {
+    color: #f04986;
   }
 
   .error {
-    color: #c0392b;
-    background: #fdecea;
+    color: #ff9aa6;
+    background: #f0498618;
+    border: 1px solid #f0498633;
     padding: 0.5rem 0.75rem;
-    border-radius: 6px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 0.5rem;
+    margin: 0.5rem 0 0;
   }
   .error .dismiss {
     flex: none;
     padding: 0.1em 0.45em;
-    color: #c0392b;
+    color: #ff9aa6;
     background: transparent;
+    border: none;
     box-shadow: none;
   }
 
   .muted {
-    color: #888;
+    color: #8b8792;
   }
   .small {
     font-size: 0.75rem;
@@ -1072,57 +1309,19 @@
   .path-box {
     font-size: 0.78rem;
     font-family: ui-monospace, monospace;
-    background: #fff;
-    border: 1px solid #ddd;
-    border-radius: 6px;
+    background: #ffffff0d;
+    border: 1px solid #ffffff1a;
+    border-radius: 8px;
     padding: 0.4rem 0.5rem;
     word-break: break-all;
     margin: 0 0 0.75rem;
+    color: #c4c0ca;
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color: #f6f6f6;
-      background-color: #2f2f2f;
-    }
-    h2 {
-      color: #bbb;
-    }
-    .ide-card,
-    .proj-card {
-      background: #1f1f1f;
-    }
-    .version {
-      color: #aaa;
-    }
-    .path {
-      color: #999;
-    }
-    button {
-      color: #fff;
-      background-color: #0f0f0f98;
-    }
-    .twist,
-    .folder-actions button {
-      background: transparent;
-    }
-    .folder-add input,
-    .search input {
-      color: #fff;
-      background-color: #1f1f1f;
-      border-color: #444;
-    }
-    .path-box {
-      background: #1f1f1f;
-      border-color: #444;
-    }
-    .tabs button {
-      color: #fff;
-      border-color: #444;
-    }
-    .tabs button.active {
-      color: #fff;
-      border-color: #396cd8;
-    }
+  code {
+    background: #ffffff12;
+    border-radius: 4px;
+    padding: 0.05em 0.35em;
+    font-size: 0.85em;
   }
 </style>
