@@ -389,12 +389,18 @@
   }
 
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
+  let unlistenFocus: (() => void) | undefined;
 
   onMount(async () => {
     await scan();
     await reload();
     await importRecent(true); // 시작 시 1회 자동 갱신
     refreshTimer = setInterval(() => importRecent(true), 10000);
+    // 트레이 앱 — 창이 파괴되지 않아 onMount 는 1회뿐. 창을 다시 열 때(포커스)
+    // 재탐지해 IDE 업데이트 후 버전 표기를 갱신.
+    unlistenFocus = await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (focused) scan();
+    });
     try {
       dataDir = await invoke<string>("data_dir");
     } catch (e) {
@@ -402,7 +408,10 @@
     }
   });
 
-  onDestroy(() => clearInterval(refreshTimer));
+  onDestroy(() => {
+    clearInterval(refreshTimer);
+    unlistenFocus?.();
+  });
 </script>
 
 <main class="container">
