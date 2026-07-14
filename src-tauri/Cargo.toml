@@ -1,6 +1,6 @@
 [package]
 name = "lite-toolbox"
-version = "0.1.0"
+version = "0.1.1"
 description = "Lightweight JetBrains IDE launcher & project manager"
 authors = ["castu"]
 edition = "2021"

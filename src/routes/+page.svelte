@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { open } from "@tauri-apps/plugin-dialog";
   import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { getVersion } from "@tauri-apps/api/app";
   import { onMount, onDestroy } from "svelte";
 
   const minimizeWindow = () => getCurrentWindow().minimize();
@@ -49,6 +50,7 @@
   let importing = $state(false);
   let addingIde = $state(false);
   let dataDir = $state("");
+  let appVersion = $state("");
   // IDE id → 아이콘 data URL.
   let iconCache = $state<Record<string, string>>({});
   let tab = $state<"project" | "ide" | "settings">("project");
@@ -403,6 +405,7 @@
     });
     try {
       dataDir = await invoke<string>("data_dir");
+      appVersion = await getVersion();
     } catch (e) {
       error = String(e);
     }
@@ -660,6 +663,14 @@
       <button class="wide" onclick={scan} disabled={loading}>
         {loading ? "스캔 중…" : "IDE 재스캔"}
       </button>
+    </div>
+
+    <div class="setting-group">
+      <h2>정보</h2>
+      <div class="app-version">
+        <span>Lite Toolbox</span>
+        <span class="ver">v{appVersion || "…"}</span>
+      </div>
     </div>
   </section>
 </main>
@@ -1367,6 +1378,18 @@
     word-break: break-all;
     margin: 0 0 0.75rem;
     color: #c4c0ca;
+  }
+
+  .app-version {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.82rem;
+    color: #c4c0ca;
+  }
+  .app-version .ver {
+    font-family: ui-monospace, monospace;
+    color: #4fd6d6;
   }
 
   code {
