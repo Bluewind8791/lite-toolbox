@@ -46,6 +46,10 @@ pub struct Store {
     // 기존 데이터의 order 를 이름순으로 1회 시드했는지 표시.
     #[serde(default)]
     pub name_seeded: bool,
+    // 사용자가 삭제한 프로젝트 id(묘비). 자동 임포트가 되살리지 않도록 차단.
+    // 같은 경로를 수동 추가하면 해제됨.
+    #[serde(default)]
+    pub deleted_ids: Vec<String>,
 }
 
 impl Default for Store {
@@ -55,6 +59,7 @@ impl Default for Store {
             folders: Vec::new(),
             projects: Vec::new(),
             name_seeded: false,
+            deleted_ids: Vec::new(),
         }
     }
 }
@@ -123,7 +128,10 @@ pub fn add_project(path: &str) -> Result<Project, String> {
     }
     let mut store = load();
     let id = id_from_path(path);
+    // 수동 추가는 삭제 묘비를 해제(다시 임포트 허용).
+    store.deleted_ids.retain(|d| d != &id);
     if let Some(existing) = store.projects.iter().find(|p| p.id == id) {
+        save(&store)?;
         return Ok(existing.clone());
     }
     let order = store.projects.len() as i64;
@@ -159,6 +167,8 @@ fn ts(s: &Option<String>) -> u64 {
 /// 배치 내 중복은 건너뜀.
 pub fn import_projects(items: Vec<ImportItem>) -> Result<usize, String> {
     let mut store = load();
+    let deleted: std::collections::HashSet<String> =
+        store.deleted_ids.iter().cloned().collect();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut added = 0usize;
     let mut changed = false;
@@ -169,6 +179,9 @@ pub fn import_projects(items: Vec<ImportItem>) -> Result<usize, String> {
             continue;
         }
         let id = id_from_path(path);
+        if deleted.contains(&id) {
+            continue; // 삭제 묘비 — 자동 임포트로 되살리지 않음
+        }
         if !seen.insert(id.clone()) {
             continue; // 배치 내 중복
         }
@@ -363,13 +376,13 @@ pub fn move_project(
     save(&store)
 }
 
-/// 프로젝트 제거.
+/// 프로젝트 제거(멱등). 이미 없어도 성공 — 묘비만 확실히 등록.
+/// 묘비로 자동 임포트 재생성을 차단(경쟁/중복 삭제에도 안전).
 pub fn remove_project(id: &str) -> Result<(), String> {
     let mut store = load();
-    let before = store.projects.len();
     store.projects.retain(|p| p.id != id);
-    if store.projects.len() == before {
-        return Err(format!("프로젝트 없음: {id}"));
+    if !store.deleted_ids.iter().any(|d| d == id) {
+        store.deleted_ids.push(id.to_string());
     }
     save(&store)
 }
