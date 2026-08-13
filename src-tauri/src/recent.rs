@@ -1,6 +1,7 @@
 //! JetBrains IDE 최근 프로젝트 임포트.
 //! `%APPDATA%\JetBrains\<ProductVersion>\options\recentProjects.xml` 파싱.
 //! Rider 는 같은 구조를 `recentSolutions.xml` 에 저장 → 두 파일명 모두 수집.
+//! 경로에 쓰이는 JetBrains 매크로(`$USER_HOME$` 등)는 해석 후 실존하는 것만 남김.
 
 use std::path::PathBuf;
 
@@ -15,7 +16,8 @@ pub struct RecentProject {
 /// 최근 프로젝트가 기록되는 파일명들. (Rider 만 recentSolutions.xml)
 const RECENT_FILES: [&str; 2] = ["recentProjects.xml", "recentSolutions.xml"];
 
-/// `%APPDATA%\JetBrains` 하위 모든 최근 프로젝트 XML 수집 → 경로 중복 제거(최신 우선).
+/// `%APPDATA%\JetBrains` 하위 모든 최근 프로젝트 XML 수집 → 매크로 해석/실존 확인 →
+/// 경로 중복 제거(최신 우선).
 pub fn recent_projects() -> Vec<RecentProject> {
     let mut all: Vec<RecentProject> = Vec::new();
     for xml in recent_xml_files() {
@@ -23,7 +25,35 @@ pub fn recent_projects() -> Vec<RecentProject> {
             all.extend(parse_recent(&text));
         }
     }
-    dedup_latest(all)
+    let home = std::env::var("USERPROFILE").unwrap_or_default();
+    dedup_latest(resolve_paths(all, &home))
+}
+
+/// 경로 매크로를 해석하고 실존하는 항목만 남김.
+fn resolve_paths(items: Vec<RecentProject>, home: &str) -> Vec<RecentProject> {
+    items
+        .into_iter()
+        .filter_map(|mut it| {
+            it.path = resolve_macro(&it.path, home)?;
+            std::path::Path::new(&it.path).exists().then_some(it)
+        })
+        .collect()
+}
+
+/// `$USER_HOME$` 만 해석. 그 외 매크로는 None —
+/// `$APPLICATION_CONFIG_DIR$/light-edit` 는 IDE 설정 폴더의 LightEdit 항목이라
+/// 경로가 실존해도 프로젝트가 아니고, 미지의 매크로는 해석할 수 없다.
+fn resolve_macro(raw: &str, home: &str) -> Option<String> {
+    if let Some(rest) = raw.strip_prefix("$USER_HOME$") {
+        if home.is_empty() {
+            return None;
+        }
+        return Some(format!("{}{}", home.replace('\\', "/"), rest));
+    }
+    if raw.starts_with('$') {
+        return None;
+    }
+    Some(raw.to_string())
 }
 
 /// JetBrains 설정 폴더들의 최근 프로젝트 XML 경로 목록.
@@ -228,6 +258,55 @@ mod tests {
         assert_eq!(r[0].path, "D:/yk/YKSecurity_windows/YKSecure.sln");
         assert_eq!(r[0].product_code, "RD");
         assert_eq!(r[0].last_opened, "1786578344743");
+    }
+
+    #[test]
+    fn expands_user_home_macro() {
+        assert_eq!(
+            resolve_macro("$USER_HOME$/PyCharmMiscProject", r"C:\Users\castu").as_deref(),
+            Some("C:/Users/castu/PyCharmMiscProject")
+        );
+        // 홈을 모르면 해석 불가.
+        assert_eq!(resolve_macro("$USER_HOME$/x", ""), None);
+    }
+
+    #[test]
+    fn drops_unresolvable_macros() {
+        // LightEdit — 폴더는 실존하지만 프로젝트가 아님.
+        assert_eq!(
+            resolve_macro("$APPLICATION_CONFIG_DIR$/light-edit", r"C:\Users\castu"),
+            None
+        );
+        assert_eq!(resolve_macro("$UNKNOWN$/x", r"C:\Users\castu"), None);
+        // 일반 경로는 그대로.
+        assert_eq!(
+            resolve_macro("D:/yk/proj-a", r"C:\Users\castu").as_deref(),
+            Some("D:/yk/proj-a")
+        );
+    }
+
+    #[test]
+    fn keeps_only_existing_paths() {
+        let items = vec![
+            RecentProject {
+                path: env!("CARGO_MANIFEST_DIR").replace('\\', "/"),
+                product_code: "IU".into(),
+                last_opened: "100".into(),
+            },
+            RecentProject {
+                path: "D:/definitely/not/here/xyz".into(),
+                product_code: "PY".into(),
+                last_opened: "200".into(),
+            },
+            RecentProject {
+                path: "$APPLICATION_CONFIG_DIR$/light-edit".into(),
+                product_code: String::new(),
+                last_opened: "300".into(),
+            },
+        ];
+        let kept = resolve_paths(items, r"C:\Users\castu");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].product_code, "IU");
     }
 
     #[test]
