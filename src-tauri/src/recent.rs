@@ -1,5 +1,6 @@
 //! JetBrains IDE 최근 프로젝트 임포트.
 //! `%APPDATA%\JetBrains\<ProductVersion>\options\recentProjects.xml` 파싱.
+//! Rider 는 같은 구조를 `recentSolutions.xml` 에 저장 → 두 파일명 모두 수집.
 
 use std::path::PathBuf;
 
@@ -11,7 +12,10 @@ pub struct RecentProject {
     pub last_opened: String,  // epoch millis 문자열 (activation 우선)
 }
 
-/// `%APPDATA%\JetBrains` 하위 모든 recentProjects.xml 수집 → 경로 중복 제거(최신 우선).
+/// 최근 프로젝트가 기록되는 파일명들. (Rider 만 recentSolutions.xml)
+const RECENT_FILES: [&str; 2] = ["recentProjects.xml", "recentSolutions.xml"];
+
+/// `%APPDATA%\JetBrains` 하위 모든 최근 프로젝트 XML 수집 → 경로 중복 제거(최신 우선).
 pub fn recent_projects() -> Vec<RecentProject> {
     let mut all: Vec<RecentProject> = Vec::new();
     for xml in recent_xml_files() {
@@ -22,7 +26,7 @@ pub fn recent_projects() -> Vec<RecentProject> {
     dedup_latest(all)
 }
 
-/// JetBrains 설정 폴더들의 recentProjects.xml 경로 목록.
+/// JetBrains 설정 폴더들의 최근 프로젝트 XML 경로 목록.
 fn recent_xml_files() -> Vec<PathBuf> {
     let Ok(appdata) = std::env::var("APPDATA") else {
         return Vec::new();
@@ -33,7 +37,10 @@ fn recent_xml_files() -> Vec<PathBuf> {
     };
     entries
         .filter_map(|e| e.ok())
-        .map(|e| e.path().join("options").join("recentProjects.xml"))
+        .flat_map(|e| {
+            let options = e.path().join("options");
+            RECENT_FILES.iter().map(move |f| options.join(f))
+        })
         .filter(|p| p.is_file())
         .collect()
 }
@@ -191,5 +198,52 @@ mod tests {
     #[test]
     fn malformed_xml_yields_empty() {
         assert!(parse_recent("<not closed").is_empty());
+    }
+
+    /// Rider recentSolutions.xml — 컴포넌트명이 RiderRecentProjectsManager 이고
+    /// entry key 가 .sln 파일 경로. 구조는 동일하므로 같은 파서로 처리돼야 함.
+    #[test]
+    fn parses_rider_recent_solutions() {
+        let xml = r#"<application>
+  <component name="RiderRecentProjectsManager">
+    <option name="additionalInfo">
+      <map>
+        <entry key="D:/yk/YKSecurity_windows/YKSecure.sln">
+          <value>
+            <RecentProjectMetaInfo displayName="YKSecure" opened="true">
+              <option name="activationTimestamp" value="1786578344743" />
+              <option name="build" value="RD-262.8665.400" />
+              <option name="productionCode" value="RD" />
+              <option name="projectOpenTimestamp" value="1786423391910" />
+            </RecentProjectMetaInfo>
+          </value>
+        </entry>
+      </map>
+    </option>
+    <option name="lastOpenedProject" value="D:/yk/YKSecurity_windows/YKSecure.sln" />
+  </component>
+</application>"#;
+        let r = parse_recent(xml);
+        assert_eq!(r.len(), 1);
+        assert_eq!(r[0].path, "D:/yk/YKSecurity_windows/YKSecure.sln");
+        assert_eq!(r[0].product_code, "RD");
+        assert_eq!(r[0].last_opened, "1786578344743");
+    }
+
+    #[test]
+    #[ignore = "실제 설치 환경 의존 — 수동 확인용 (cargo test -- --ignored --nocapture)"]
+    fn live_recent_smoke() {
+        for f in recent_xml_files() {
+            println!("  xml: {}", f.display());
+        }
+        for p in recent_projects() {
+            println!("  [{}] {} ({})", p.product_code, p.path, p.last_opened);
+        }
+    }
+
+    #[test]
+    fn collects_both_recent_file_names() {
+        assert!(RECENT_FILES.contains(&"recentProjects.xml"));
+        assert!(RECENT_FILES.contains(&"recentSolutions.xml"));
     }
 }

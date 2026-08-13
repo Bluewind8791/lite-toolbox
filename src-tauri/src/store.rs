@@ -111,13 +111,14 @@ fn id_from_path(path: &str) -> String {
     format!("p{:016x}", hasher.finish())
 }
 
-/// 경로 마지막 구성요소를 표시명으로.
+/// 경로 마지막 구성요소를 표시명으로. Rider 는 프로젝트 경로가 `.sln` 파일이라 확장자 제거.
 fn name_from_path(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or(path)
-        .to_string()
+    let p = std::path::Path::new(path);
+    let is_sln = p
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("sln"));
+    let name = if is_sln { p.file_stem() } else { p.file_name() };
+    name.and_then(|s| s.to_str()).unwrap_or(path).to_string()
 }
 
 /// 프로젝트 추가. 중복 경로면 기존 항목 반환(추가 안 함).
@@ -418,6 +419,9 @@ mod tests {
     #[test]
     fn name_is_last_component() {
         assert_eq!(name_from_path(r"C:\Dev\my-proj"), "my-proj");
+        // Rider: .sln 경로는 확장자 제거.
+        assert_eq!(name_from_path("D:/yk/YKSecurity_windows/YKSecure.sln"), "YKSecure");
+        assert_eq!(name_from_path(r"D:\yk\Foo.SLN"), "Foo");
     }
 
     #[test]
