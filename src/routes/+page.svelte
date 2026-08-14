@@ -41,7 +41,7 @@
   let ides = $state<DetectedIde[]>([]);
   let projects = $state<Project[]>([]);
   let folders = $state<Folder[]>([]);
-  // 실제 디렉토리가 없는 프로젝트 id.
+  // 실제 경로가 없는 프로젝트 id.
   let missing = $state<Set<string>>(new Set());
   let loading = $state(false);
   let error = $state("");
@@ -749,7 +749,7 @@
       <span class="proj-badge none" title="IDE 미지정">?</span>
     {/if}
     <div class="proj-info" class:missing={missing.has(p.id)}>
-      <div class="proj-name" title={missing.has(p.id) ? "디렉토리 없음" : p.name}>
+      <div class="proj-name" title={missing.has(p.id) ? "경로 없음" : p.name}>
         {p.name}
       </div>
       <div class="proj-path">{p.path}</div>

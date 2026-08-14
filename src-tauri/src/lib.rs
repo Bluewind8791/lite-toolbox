@@ -67,13 +67,14 @@ fn list_projects() -> Vec<Project> {
     store::load().projects
 }
 
-/// 실제 디렉토리가 없는 프로젝트 id 목록.
+/// 실제 경로가 없는 프로젝트 id 목록.
+/// Rider 는 프로젝트 경로가 `.sln` 파일이라 디렉토리가 아님 → exists 로 판정.
 #[tauri::command]
 fn missing_project_ids() -> Vec<String> {
     store::load()
         .projects
         .into_iter()
-        .filter(|p| !std::path::Path::new(&p.path).is_dir())
+        .filter(|p| !std::path::Path::new(&p.path).exists())
         .map(|p| p.id)
         .collect()
 }
