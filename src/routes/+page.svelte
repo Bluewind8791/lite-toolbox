@@ -43,6 +43,8 @@
   let folders = $state<Folder[]>([]);
   // 실제 경로가 없는 프로젝트 id.
   let missing = $state<Set<string>>(new Set());
+  // 경로가 실존하는 프로젝트만 리스트에 노출.
+  let visible = $derived(projects.filter((p) => !missing.has(p.id)));
   let loading = $state(false);
   let error = $state("");
   let launching = $state<string | null>(null);
@@ -80,7 +82,7 @@
       .sort((a, b) => a.order - b.order);
   }
   function projectsIn(folderId: string | null): Project[] {
-    return projects
+    return visible
       .filter((p) => (p.folderId ?? null) === folderId)
       .sort((a, b) => a.order - b.order);
   }
@@ -101,7 +103,7 @@
   let results = $derived.by(() => {
     const q = search.trim().toLowerCase();
     if (!q) return [];
-    return projects
+    return visible
       .filter((p) => fuzzy(q, p.name) || fuzzy(q, p.path))
       .sort((a, b) => a.name.localeCompare(b.name));
   });
@@ -571,7 +573,7 @@
           {/each}
         </ul>
       {/if}
-    {:else if projects.length === 0 && folders.length === 0}
+    {:else if visible.length === 0 && folders.length === 0}
       <p class="muted">
         등록된 프로젝트가 없습니다. 설정 탭의 "수동으로 최근 프로젝트 가져오기"로 IDE
         기록을 불러올 수 있습니다.
@@ -748,8 +750,8 @@
     {:else}
       <span class="proj-badge none" title="IDE 미지정">?</span>
     {/if}
-    <div class="proj-info" class:missing={missing.has(p.id)}>
-      <div class="proj-name" title={missing.has(p.id) ? "경로 없음" : p.name}>
+    <div class="proj-info">
+      <div class="proj-name" title={p.name}>
         {p.name}
       </div>
       <div class="proj-path">{p.path}</div>
@@ -1261,10 +1263,6 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
-  }
-  .proj-info.missing .proj-name,
-  .proj-info.missing .proj-path {
-    color: #6f6b77;
   }
   .name {
     font-weight: 600;
