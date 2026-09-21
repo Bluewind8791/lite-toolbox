@@ -70,11 +70,17 @@
   let collapsed = $state<Record<string, boolean>>({});
   // 인라인 이름편집 중인 폴더.
   let editing = $state<{ id: string; value: string } | null>(null);
-  // 드래그 중 프로젝트 id (폴더는 항상 루트, 드래그 불가).
-  let dragItem = $state<string | null>(null);
+  type DragItem =
+    | { kind: "project"; id: string }
+    | { kind: "folder"; id: string };
+
+  // 프로젝트 이동과 폴더 정렬이 같은 드롭 영역에서 충돌하지 않도록 유형을 함께 저장.
+  let dragItem = $state<DragItem | null>(null);
   let dropTarget = $state<string | null | undefined>(undefined);
   // 이 프로젝트 카드 "앞"에 삽입 예정임을 표시.
   let dropBeforeId = $state<string | null>(null);
+  // 이 최상위 폴더 앞에 삽입. __end__ 는 미분류 바로 앞(폴더 목록 맨 끝).
+  let dropBeforeFolderId = $state<string | "__end__" | null>(null);
 
   function childFolders(parentId: string | null): Folder[] {
     return folders
@@ -328,30 +334,47 @@
 
   // --- 드래그앤드롭 ---
 
-  function startDrag(e: DragEvent, id: string) {
-    dragItem = id;
-    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+  function startProjectDrag(e: DragEvent, id: string) {
+    dragItem = { kind: "project", id };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", id);
+    }
+  }
+  function startFolderDrag(e: DragEvent, id: string) {
+    dragItem = { kind: "folder", id };
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", id);
+    }
+  }
+  function finishDrag() {
+    dragItem = null;
+    dropTarget = undefined;
+    dropBeforeId = null;
+    dropBeforeFolderId = null;
   }
   function allowDrop(e: DragEvent, target: string | null) {
-    if (!dragItem) return;
+    if (dragItem?.kind !== "project") return;
     e.preventDefault();
     dropTarget = target;
+    dropBeforeFolderId = null;
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   }
   function clearDrop() {
     dropTarget = undefined;
+    dropBeforeFolderId = null;
   }
   async function dropOn(e: DragEvent, folderId: string | null) {
     e.preventDefault();
     e.stopPropagation();
-    dropTarget = undefined;
-    const projectId = dragItem;
-    dragItem = null;
-    if (!projectId) return;
+    const item = dragItem;
+    finishDrag();
+    if (item?.kind !== "project") return;
     error = "";
     try {
       // beforeId 없음 = 폴더 맨 끝에 배치.
-      await invoke("move_project", { id: projectId, folderId, beforeId: null });
+      await invoke("move_project", { id: item.id, folderId, beforeId: null });
       await reload();
     } catch (e2) {
       error = String(e2);
@@ -360,11 +383,12 @@
 
   // 카드 위로 드래그: 그 카드 앞에 삽입 예정 표시. (검색 중엔 비활성)
   function allowBefore(e: DragEvent, p: Project) {
-    if (!dragItem || dragItem === p.id || search.trim()) return;
+    if (dragItem?.kind !== "project" || dragItem.id === p.id || search.trim()) return;
     e.preventDefault();
     e.stopPropagation();
     dropBeforeId = p.id;
     dropTarget = undefined;
+    dropBeforeFolderId = null;
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
   }
   function clearBefore() {
@@ -372,17 +396,16 @@
   }
   // 카드 위에 드롭: 같은 폴더의 그 카드 앞으로 이동(재정렬).
   async function dropBeforeCard(e: DragEvent, p: Project) {
-    if (search.trim()) return;
+    if (search.trim() || dragItem?.kind !== "project") return;
     e.preventDefault();
     e.stopPropagation();
-    const projectId = dragItem;
-    dragItem = null;
-    dropBeforeId = null;
-    if (!projectId || projectId === p.id) return;
+    const item = dragItem;
+    finishDrag();
+    if (item?.kind !== "project" || item.id === p.id) return;
     error = "";
     try {
       await invoke("move_project", {
-        id: projectId,
+        id: item.id,
         folderId: p.folderId ?? null,
         beforeId: p.id,
       });
@@ -390,6 +413,63 @@
     } catch (e2) {
       error = String(e2);
     }
+  }
+
+  function allowBeforeFolder(e: DragEvent, folder: Folder) {
+    if (dragItem?.kind !== "folder" || dragItem.id === folder.id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dropBeforeFolderId = folder.id;
+    dropTarget = undefined;
+    dropBeforeId = null;
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  }
+  async function dropFolder(e: DragEvent, beforeId: string | null) {
+    e.preventDefault();
+    e.stopPropagation();
+    const item = dragItem;
+    finishDrag();
+    if (item?.kind !== "folder" || item.id === beforeId) return;
+    error = "";
+    try {
+      await invoke("move_folder", { id: item.id, parentId: null, beforeId });
+      await reload();
+    } catch (e2) {
+      error = String(e2);
+    }
+  }
+  function allowFolderHeaderDrop(e: DragEvent, folder: Folder, depth: number) {
+    if (dragItem?.kind === "folder") {
+      if (depth === 0) allowBeforeFolder(e, folder);
+      return;
+    }
+    allowDrop(e, folder.id);
+  }
+  async function dropOnFolderHeader(e: DragEvent, folder: Folder, depth: number) {
+    if (dragItem?.kind === "folder") {
+      if (depth === 0) await dropFolder(e, folder.id);
+      return;
+    }
+    await dropOn(e, folder.id);
+  }
+  function allowUnfiledDrop(e: DragEvent) {
+    if (dragItem?.kind === "folder") {
+      e.preventDefault();
+      e.stopPropagation();
+      dropBeforeFolderId = "__end__";
+      dropTarget = undefined;
+      dropBeforeId = null;
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      return;
+    }
+    allowDrop(e, null);
+  }
+  async function dropOnUnfiled(e: DragEvent) {
+    if (dragItem?.kind === "folder") {
+      await dropFolder(e, null);
+      return;
+    }
+    await dropOn(e, null);
   }
 
   let refreshTimer: ReturnType<typeof setInterval> | undefined;
@@ -587,11 +667,13 @@
         <li
           class="unfiled"
           class:drop={dropTarget === null}
-          ondragover={(e) => allowDrop(e, null)}
+          class:drop-before={dropBeforeFolderId === "__end__"}
+          ondragover={allowUnfiledDrop}
           ondragleave={clearDrop}
-          ondrop={(e) => dropOn(e, null)}
+          ondrop={dropOnUnfiled}
         >
           <div class="folder-head" style="padding-left:0">
+            <span class="folder-drag-spacer" aria-hidden="true"></span>
             <button
               class="chevron"
               class:open={!isCollapsed("__unfiled__")}
@@ -678,15 +760,32 @@
 </main>
 
 {#snippet folderNode(folder: Folder, depth: number)}
-  <li class="folder">
+  <li class="folder" class:drop-before={dropBeforeFolderId === folder.id}>
     <div
       class="folder-head"
       class:drop={dropTarget === folder.id}
-      ondragover={(e) => allowDrop(e, folder.id)}
+      ondragover={(e) => allowFolderHeaderDrop(e, folder, depth)}
       ondragleave={clearDrop}
-      ondrop={(e) => dropOn(e, folder.id)}
+      ondrop={(e) => dropOnFolderHeader(e, folder, depth)}
       style="padding-left:0"
     >
+      {#if depth === 0}
+        <button
+          class="folder-drag-handle"
+          draggable="true"
+          ondragstart={(e) => startFolderDrag(e, folder.id)}
+          ondragend={finishDrag}
+          onclick={(e) => e.stopPropagation()}
+          title="드래그하여 순서 변경"
+          aria-label={`${folder.name} 순서 변경`}
+        >
+          <svg viewBox="0 0 12 18" aria-hidden="true">
+            <circle cx="3" cy="3" r="1.2" /><circle cx="9" cy="3" r="1.2" />
+            <circle cx="3" cy="9" r="1.2" /><circle cx="9" cy="9" r="1.2" />
+            <circle cx="3" cy="15" r="1.2" /><circle cx="9" cy="15" r="1.2" />
+          </svg>
+        </button>
+      {/if}
       <button
         class="chevron"
         class:open={!isCollapsed(folder.id)}
@@ -737,7 +836,8 @@
     class="proj-card"
     class:drop-before={dropBeforeId === p.id}
     draggable="true"
-    ondragstart={(e) => startDrag(e, p.id)}
+    ondragstart={(e) => startProjectDrag(e, p.id)}
+    ondragend={finishDrag}
     ondragover={(e) => allowBefore(e, p)}
     ondragleave={clearBefore}
     ondrop={(e) => dropBeforeCard(e, p)}
@@ -1070,6 +1170,23 @@
     border-left: 1px solid #ffffff12;
   }
 
+  .folder,
+  .unfiled {
+    position: relative;
+  }
+  .folder.drop-before::before,
+  .unfiled.drop-before::before {
+    content: "";
+    position: absolute;
+    z-index: 1;
+    left: 0;
+    right: 0;
+    top: -1px;
+    height: 2px;
+    background: #4fd0c0;
+    border-radius: 2px;
+  }
+
   /* --- 폴더 헤더 --- */
   .folder-head {
     display: flex;
@@ -1086,6 +1203,36 @@
   .folder-head.drop {
     outline: 2px dashed #4fd0c0;
     background: #4fd0c014;
+  }
+  .folder-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 14px;
+    height: 18px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: #6f6b77;
+    cursor: grab;
+  }
+  .folder-drag-handle:active {
+    cursor: grabbing;
+  }
+  .folder-drag-handle:hover {
+    color: #b8b4bf;
+    background: transparent;
+  }
+  .folder-drag-handle svg {
+    width: 10px;
+    height: 15px;
+    fill: currentColor;
+  }
+  .folder-drag-spacer {
+    flex: none;
+    width: 14px;
   }
   .chevron {
     display: flex;

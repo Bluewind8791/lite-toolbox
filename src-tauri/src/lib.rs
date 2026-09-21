@@ -115,10 +115,14 @@ fn remove_folder(id: String) -> Result<(), String> {
     store::remove_folder(&id)
 }
 
-/// 폴더 이동(재부모).
+/// 폴더 이동 및 형제 순서 변경. before_id 생략 시 대상 부모의 맨 뒤.
 #[tauri::command]
-fn move_folder(id: String, parent_id: Option<String>) -> Result<(), String> {
-    store::move_folder(&id, parent_id)
+fn move_folder(
+    id: String,
+    parent_id: Option<String>,
+    before_id: Option<String>,
+) -> Result<(), String> {
+    store::move_folder(&id, parent_id, before_id)
 }
 
 /// 프로젝트를 폴더에 배정 + 위치 지정. folder_id 생략 시 미분류.

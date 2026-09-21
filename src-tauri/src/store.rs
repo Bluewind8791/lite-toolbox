@@ -306,22 +306,113 @@ fn is_descendant(folders: &[Folder], id: &str, ancestor: &str) -> bool {
     false
 }
 
-/// 폴더 이동(재부모). 자기 자신/자손으로 이동 금지(사이클).
-pub fn move_folder(id: &str, parent_id: Option<String>) -> Result<(), String> {
-    let mut store = load();
-    if !store.folders.iter().any(|f| f.id == id) {
+fn validate_folder_move(
+    folders: &[Folder],
+    id: &str,
+    parent_id: Option<&str>,
+    before_id: Option<&str>,
+) -> Result<(), String> {
+    if !folders.iter().any(|f| f.id == id) {
         return Err(format!("폴더 없음: {id}"));
     }
-    if let Some(pid) = &parent_id {
-        if pid == id || is_descendant(&store.folders, pid, id) {
+    if let Some(pid) = parent_id {
+        if pid == id || is_descendant(folders, pid, id) {
             return Err("자기 자신 또는 하위 폴더로 이동할 수 없습니다.".to_string());
         }
-        if !store.folders.iter().any(|f| &f.id == pid) {
+        if !folders.iter().any(|f| f.id == pid) {
             return Err(format!("대상 폴더 없음: {pid}"));
         }
     }
-    let f = store.folders.iter_mut().find(|f| f.id == id).unwrap();
-    f.parent_id = parent_id;
+
+    if let Some(bid) = before_id {
+        if bid == id {
+            return Err("이동할 폴더 자신을 기준 위치로 지정할 수 없습니다.".to_string());
+        }
+        let before = folders
+            .iter()
+            .find(|f| f.id == bid)
+            .ok_or_else(|| format!("기준 폴더 없음: {bid}"))?;
+        if before.parent_id.as_deref() != parent_id {
+            return Err("기준 폴더가 대상 위치의 형제 폴더가 아닙니다.".to_string());
+        }
+    }
+    Ok(())
+}
+
+fn ordered_folder_ids(folders: &[Folder], parent_id: Option<&str>) -> Vec<String> {
+    let mut ids: Vec<(i64, String)> = folders
+        .iter()
+        .filter(|f| f.parent_id.as_deref() == parent_id)
+        .map(|f| (f.order, f.id.clone()))
+        .collect();
+    ids.sort_by_key(|(order, _)| *order);
+    ids.into_iter().map(|(_, id)| id).collect()
+}
+
+fn assign_folder_orders(folders: &mut [Folder], ids: &[String]) {
+    for (index, id) in ids.iter().enumerate() {
+        if let Some(folder) = folders.iter_mut().find(|f| &f.id == id) {
+            folder.order = index as i64;
+        }
+    }
+}
+
+fn normalize_folder_orders(folders: &mut [Folder], parent_id: Option<&str>) {
+    let ids = ordered_folder_ids(folders, parent_id);
+    assign_folder_orders(folders, &ids);
+}
+
+fn reorder_folder_siblings(
+    folders: &mut [Folder],
+    parent_id: Option<&str>,
+    id: &str,
+    before_id: Option<&str>,
+) {
+    let mut ids = ordered_folder_ids(folders, parent_id);
+    ids.retain(|folder_id| folder_id != id);
+    let position = before_id
+        .and_then(|bid| ids.iter().position(|folder_id| folder_id == bid))
+        .unwrap_or(ids.len());
+    ids.insert(position, id.to_string());
+    assign_folder_orders(folders, &ids);
+}
+
+/// 폴더 이동 및 형제 순서 변경. before_id 가 없으면 대상 부모의 맨 뒤로 이동.
+/// 자기 자신/자손으로 이동하거나 다른 부모의 폴더를 기준 위치로 지정할 수 없다.
+pub fn move_folder(
+    id: &str,
+    parent_id: Option<String>,
+    before_id: Option<String>,
+) -> Result<(), String> {
+    let mut store = load();
+    validate_folder_move(
+        &store.folders,
+        id,
+        parent_id.as_deref(),
+        before_id.as_deref(),
+    )?;
+
+    let old_parent_id = store
+        .folders
+        .iter()
+        .find(|f| f.id == id)
+        .and_then(|f| f.parent_id.clone());
+    store
+        .folders
+        .iter_mut()
+        .find(|f| f.id == id)
+        .unwrap()
+        .parent_id = parent_id.clone();
+
+    if old_parent_id != parent_id {
+        normalize_folder_orders(&mut store.folders, old_parent_id.as_deref());
+    }
+    reorder_folder_siblings(
+        &mut store.folders,
+        parent_id.as_deref(),
+        id,
+        before_id.as_deref(),
+    );
     save(&store)
 }
 
@@ -442,6 +533,65 @@ mod tests {
         // c 는 a 의 자손 → a 를 c 밑으로 이동 금지.
         assert!(is_descendant(&folders, "c", "a"));
         assert!(!is_descendant(&folders, "a", "c"));
+    }
+
+    #[test]
+    fn reorders_root_folders_before_sibling_and_at_end() {
+        let mut folders = vec![
+            Folder {
+                id: "a".into(),
+                name: "A".into(),
+                parent_id: None,
+                order: 0,
+            },
+            Folder {
+                id: "b".into(),
+                name: "B".into(),
+                parent_id: None,
+                order: 1,
+            },
+            Folder {
+                id: "c".into(),
+                name: "C".into(),
+                parent_id: None,
+                order: 2,
+            },
+            Folder {
+                id: "nested".into(),
+                name: "Nested".into(),
+                parent_id: Some("a".into()),
+                order: 9,
+            },
+        ];
+
+        reorder_folder_siblings(&mut folders, None, "c", Some("a"));
+        assert_eq!(ordered_folder_ids(&folders, None), vec!["c", "a", "b"]);
+        assert_eq!(folders.iter().find(|f| f.id == "nested").unwrap().order, 9);
+
+        reorder_folder_siblings(&mut folders, None, "c", None);
+        assert_eq!(ordered_folder_ids(&folders, None), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn rejects_invalid_folder_reorder_target() {
+        let folders = vec![
+            Folder {
+                id: "a".into(),
+                name: "A".into(),
+                parent_id: None,
+                order: 0,
+            },
+            Folder {
+                id: "b".into(),
+                name: "B".into(),
+                parent_id: Some("a".into()),
+                order: 0,
+            },
+        ];
+
+        assert!(validate_folder_move(&folders, "a", None, Some("missing")).is_err());
+        assert!(validate_folder_move(&folders, "a", None, Some("b")).is_err());
+        assert!(validate_folder_move(&folders, "a", None, Some("a")).is_err());
     }
 
     #[test]
