@@ -1,6 +1,7 @@
 //! JetBrains IDE 최근 프로젝트 임포트.
 //! `%APPDATA%\JetBrains\<ProductVersion>\options\recentProjects.xml` 파싱.
 //! Rider 는 같은 구조를 `recentSolutions.xml` 에 저장 → 두 파일명 모두 수집.
+//! Android Studio 는 같은 구조를 `%APPDATA%\Google\AndroidStudio<ver>\options` 에 저장.
 //! 경로에 쓰이는 JetBrains 매크로(`$USER_HOME$` 등)는 해석 후 실존하는 것만 남김.
 
 use std::path::PathBuf;
@@ -56,16 +57,19 @@ fn resolve_macro(raw: &str, home: &str) -> Option<String> {
     Some(raw.to_string())
 }
 
-/// JetBrains 설정 폴더들의 최근 프로젝트 XML 경로 목록.
+/// 설정 폴더 루트들. Android Studio 는 `%APPDATA%\Google\AndroidStudio<ver>` 에 저장.
+const CONFIG_ROOTS: [&str; 2] = ["JetBrains", "Google"];
+
+/// JetBrains / Android Studio 설정 폴더들의 최근 프로젝트 XML 경로 목록.
 fn recent_xml_files() -> Vec<PathBuf> {
     let Ok(appdata) = std::env::var("APPDATA") else {
         return Vec::new();
     };
-    let root = PathBuf::from(appdata).join("JetBrains");
-    let Ok(entries) = std::fs::read_dir(&root) else {
-        return Vec::new();
-    };
-    entries
+    let appdata = PathBuf::from(appdata);
+    CONFIG_ROOTS
+        .iter()
+        .filter_map(|r| std::fs::read_dir(appdata.join(r)).ok())
+        .flatten()
         .filter_map(|e| e.ok())
         .flat_map(|e| {
             let options = e.path().join("options");
